@@ -11,11 +11,11 @@ flannel-probe: *.go
 	strip flannel-probe
 
 push: flannel-probe
-	rsync -av flannel-probe orch-esx-3052.tetrationanalytics.com:/tmp/flannel-probe
+	rsync -av flannel-probe orch-$(CLUSTER).tetrationanalytics.com:/tmp/flannel-probe
 
 deploy_binary: push
-	rsync -av deploybinary.sh orch-esx-3052.tetrationanalytics.com:/tmp/deploybinary.sh
-	ssh orch-esx-3052.tetrationanalytics.com "sudo -u tetinstall -i /tmp/deploybinary.sh"
+	rsync -av deploybinary.sh orch-$(CLUSTER).tetrationanalytics.com:/tmp/deploybinary.sh
+	ssh orch-$(CLUSTER).tetrationanalytics.com "sudo -u tetinstall -i /tmp/deploybinary.sh"
 	kubectl rollout restart ds/flannel-probe
 
 dockerbuild:
@@ -26,11 +26,11 @@ image: flannel-probe dockerbuild
 	ls -lh $(TMPFOLDER)/$(TARFILE)
 
 pushimage: image
-	rsync -avz $(TMPFOLDER)/$(TARFILE) orch-esx-3052.tetrationanalytics.com:/tmp/$(TARFILE)
+	rsync -avz $(TMPFOLDER)/$(TARFILE) orch-$(CLUSTER).tetrationanalytics.com:/tmp/$(TARFILE)
 
 deploy_image: pushimage
-	scp deploy.sh orch-esx-3052.tetrationanalytics.com:/tmp/deploy.sh
-	ssh orch-esx-3052.tetrationanalytics.com "sudo -u tetinstall -i /tmp/deploy.sh"
+	scp deploy.sh orch-$(CLUSTER).tetrationanalytics.com:/tmp/deploy.sh
+	ssh orch-$(CLUSTER).tetrationanalytics.com "sudo -u tetinstall -i /tmp/deploy.sh"
 
 increment:
 	@expr `cat version` + 1 > version

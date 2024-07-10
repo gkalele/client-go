@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"os"
 	"strings"
 	"time"
@@ -55,6 +57,7 @@ func main() {
 	initalizePortRange()
 	fmt.Printf("Running in pod %s\n", podName)
 	for {
+		summaryBuffer := bytes.Buffer{}
 		// get pods in all the namespaces by omitting namespace
 		// Or specify namespace to get pods in particular namespace
 		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
@@ -63,43 +66,72 @@ func main() {
 		} else {
 			fmt.Printf("%s There are %d pods in the cluster\n", podName, len(pods.Items))
 			for _, p := range pods.Items {
+				if !isReady(&p) {
+					continue
+				}
 				if p.Status.PodIP == "" {
 					fmt.Printf("SKIPPING because %s has no pod ip\n", p.Name)
 					continue
 				}
 				fmt.Printf("Ping %-30s => %-30s ...", podName, p.Status.PodIP)
-				printPingTest(p.Status.PodIP)
+				printPingTest(p.Status.PodIP, p.Name)
+
 				if strings.Contains(p.Name, "flannel-probe-") {
 					// Let's try to curl to other flannel probe HTTP server ports
 					if curlTo(p.Status.PodIP, 8080) != nil {
-						fmt.Printf("CURL %s => %s failed\n", podName, p.Name)
+						curlProbeFailed.Inc()
+						summaryBuffer.WriteString(fmt.Sprintf("CURL %s => %s failed\n", podName, p.Name))
 					} else {
-						fmt.Printf("Node %s => %s inter-probe connectivity works", hostName, p.Spec.NodeName)
+						curlProbeSuccess.Inc()
+						summaryBuffer.WriteString(fmt.Sprintf("Node %s => %s inter-probe connectivity works\n", hostName, p.Spec.NodeName))
 					}
 				}
 			}
 		}
+		fmt.Println("FLANNEL inter-pod curl summary")
+		fmt.Println(summaryBuffer.String())
 		fmt.Println("DNS probes")
 		for _, hostname := range dnsEntries {
 			fmt.Printf("Generic DNS testing %s ", hostname)
-			printPingTest(hostname)
+			if printPingTest(hostname, "") == nil {
+				dnsSuccessful.Inc()
+			} else {
+				dnsFailed.Inc()
+			}
 		}
 		time.Sleep(10 * time.Second)
 	}
 }
 
-func printPingTest(host string) error {
+func isReady(pod *v1.Pod) bool {
+	if pod.Status.Phase == "Running" {
+		return true
+	}
+	return false
+}
+
+func printPingTest(host string, podName string) error {
 	results, err := tryPinging(host)
 	if err != nil {
 		fmt.Printf("FAILED - %s\n", err.Error())
 		return err
 	}
+	success := "FAILED"
+	if results.PacketsRecv == results.PacketsSent {
+		success = "SUCCESS"
+		pingsSuccessful.Inc()
+	} else {
+		pingsFailed.Inc()
+		err = fmt.Errorf("pings failed")
+	}
 	fmt.Printf(
-		"%2d/%2d pings - avgRTT %3d ms maxRTT %3d ms\n",
-		results.PacketsSent,
+		"%8s %2d/%2d pings - avgRTT %3d ms maxRTT %3d ms (podName: %s)\n",
+		success,
 		results.PacketsRecv,
+		results.PacketsSent,
 		results.AvgRtt.Milliseconds(),
 		results.MaxRtt.Milliseconds(),
+		podName,
 	)
-	return nil
+	return err
 }

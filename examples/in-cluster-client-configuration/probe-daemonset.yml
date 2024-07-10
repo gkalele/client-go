@@ -27,6 +27,11 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
+        - name: VIRTUAL_HOSTNAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
         image: flannel-probe:1.26
         imagePullPolicy: Never
         name: probe
