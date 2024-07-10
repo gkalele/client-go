@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  annotations:
+  name: flannel-probe
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: flannel-probe
+  template:
+    metadata:
+      labels:
+        app: flannel-probe
+    spec:
+      containers:
+      - command:
+        - /entrypoint.sh
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: VIRTUAL_HOSTNAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        image: flannel-probe:1.{{ version }}
+        imagePullPolicy: Never
+        name: probe
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /local/logs/tetration/flannel-probe
+          name: logs
+        - mountPath: /binaries
+          name: binaries
+      dnsPolicy: ClusterFirst
+      hostNetwork: false
+      priorityClassName: system-node-critical
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      serviceAccount: csw.read.only
+      serviceAccountName: csw.read.only
+      terminationGracePeriodSeconds: 3
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /local/logs/tetration/flannel-probe
+          type: ""
+        name: logs
+      - hostPath:
+          path: /tmp
+          type: ""
+        name: binaries
+      - hostPath:
+          path: /etc/cni/net.d
+          type: ""
+        name: cni
+      - configMap:
+          defaultMode: 420
+          name: kube-flannel-cfg
+        name: flannel-cfg
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 16
+    type: RollingUpdate

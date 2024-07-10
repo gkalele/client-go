@@ -13,5 +13,9 @@
 # limitations under the License.
 
 FROM debian
-COPY ./app /app
-ENTRYPOINT /app
+RUN apt-get update
+RUN apt-get install -y bind9-dnsutils iputils-ping tcpdump wget curl
+RUN apt-get install -y procps
+COPY ./entrypoint.sh /entrypoint.sh
+ENTRYPOINT /entrypoint.sh
+

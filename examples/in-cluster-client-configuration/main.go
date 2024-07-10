@@ -14,27 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Note: the example only works with the code within the same release/branch.
 package main
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	//
 	// Uncomment to load all auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth"
-	//
-	// Or uncomment to load specific auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/azure"
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
+
+var (
+	dnsEntries []string
+)
+
+func init() {
+	dnsEntries = []string{"tsdb.service.consul", "datanode-1", "vault.service.consul"}
+}
 
 func main() {
 	// creates the in-cluster config
@@ -42,34 +45,61 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
-	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
+	podName := os.Getenv("POD_NAME")
+	hostName := os.Getenv("VIRTUAL_HOSTNAME")
+	go StartWebServer(podName)
+	initalizePortRange()
+	fmt.Printf("Running in pod %s\n", podName)
 	for {
 		// get pods in all the namespaces by omitting namespace
 		// Or specify namespace to get pods in particular namespace
 		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
-			panic(err.Error())
-		}
-		fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
-
-		// Examples for error handling:
-		// - Use helper functions e.g. errors.IsNotFound()
-		// - And/or cast to StatusError and use its properties like e.g. ErrStatus.Message
-		_, err = clientset.CoreV1().Pods("default").Get(context.TODO(), "example-xxxxx", metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			fmt.Printf("Pod example-xxxxx not found in default namespace\n")
-		} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-			fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
-		} else if err != nil {
-			panic(err.Error())
+			fmt.Printf("Error listing pods: %s\n", err.Error())
 		} else {
-			fmt.Printf("Found example-xxxxx pod in default namespace\n")
+			fmt.Printf("%s There are %d pods in the cluster\n", podName, len(pods.Items))
+			for _, p := range pods.Items {
+				if p.Status.PodIP == "" {
+					fmt.Printf("SKIPPING because %s has no pod ip\n", p.Name)
+					continue
+				}
+				fmt.Printf("Ping %-30s => %-30s ...", podName, p.Status.PodIP)
+				printPingTest(p.Status.PodIP)
+				if strings.Contains(p.Name, "flannel-probe-") {
+					// Let's try to curl to other flannel probe HTTP server ports
+					if curlTo(p.Status.PodIP, 8080) != nil {
+						fmt.Printf("CURL %s => %s failed\n", podName, p.Name)
+					} else {
+						fmt.Printf("Node %s => %s inter-probe connectivity works", hostName, p.Spec.NodeName)
+					}
+				}
+			}
 		}
-
+		fmt.Println("DNS probes")
+		for _, hostname := range dnsEntries {
+			fmt.Printf("Generic DNS testing %s ", hostname)
+			printPingTest(hostname)
+		}
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func printPingTest(host string) error {
+	results, err := tryPinging(host)
+	if err != nil {
+		fmt.Printf("FAILED - %s\n", err.Error())
+		return err
+	}
+	fmt.Printf(
+		"%2d/%2d pings - avgRTT %3d ms maxRTT %3d ms\n",
+		results.PacketsSent,
+		results.PacketsRecv,
+		results.AvgRtt.Milliseconds(),
+		results.MaxRtt.Milliseconds(),
+	)
+	return nil
 }
