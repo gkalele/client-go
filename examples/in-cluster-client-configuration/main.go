@@ -28,9 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	//
-	// Uncomment to load all auth plugins
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
 var (
@@ -51,10 +48,16 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
 	podName := os.Getenv("POD_NAME")
 	hostName := os.Getenv("VIRTUAL_HOSTNAME")
-	go StartWebServer(podName)
 	initalizePortRange()
+
+	go StartWebServer(ctx, podName)
+	go startPrometheusMetricsHandler(ctx)
+
 	fmt.Printf("Running in pod %s\n", podName)
 	for {
 		summaryBuffer := bytes.Buffer{}
@@ -125,13 +128,15 @@ func printPingTest(host string, podName string) error {
 		err = fmt.Errorf("pings failed")
 	}
 	fmt.Printf(
-		"%8s %2d/%2d pings - avgRTT %3d ms maxRTT %3d ms (podName: %s)\n",
+		"%8s %2d/%2d pings - avgRTT %3d ms maxRTT %3d ms",
 		success,
 		results.PacketsRecv,
 		results.PacketsSent,
 		results.AvgRtt.Milliseconds(),
-		results.MaxRtt.Milliseconds(),
-		podName,
-	)
+		results.MaxRtt.Milliseconds())
+	if podName != "" {
+		fmt.Printf("( pod: %s )", podName)
+	}
+	fmt.Println("")
 	return err
 }

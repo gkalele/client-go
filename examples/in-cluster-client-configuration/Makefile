@@ -1,5 +1,8 @@
 .PHONY: all dockerbuild pushimage deploy_image push deploy_binary image
 
+# CLUSTER environment variable must be set for any targets that push to a cluster.
+# kubeconfig default context should also point to the cluster.
+
 all: dockerbuild flannel-probe
 
 TMPFOLDER:=/tmp/ramdisk

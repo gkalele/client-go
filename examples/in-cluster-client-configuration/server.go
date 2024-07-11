@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 )
 
-func StartWebServer(podName string) {
+func StartWebServer(ctx context.Context, podName string) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Server - podname %s", podName)
 	})

@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 	"net/http"
+	"strings"
+	"time"
 )
 
 var (
@@ -21,15 +27,48 @@ func generateNewCounter(name string) prometheus.Counter {
 }
 
 func init() {
-	pingsSuccessful = generateNewCounter("pings.success")
-	pingsFailed = generateNewCounter("pings.failed")
-	dnsSuccessful = generateNewCounter("dns.success")
-	dnsFailed = generateNewCounter("dns.failed")
-	curlProbeSuccess = generateNewCounter("curl.probe.success")
-	curlProbeFailed = generateNewCounter("curl.probe.failed")
+	pingsSuccessful = generateNewCounter("pings_success")
+	pingsFailed = generateNewCounter("pings_failed")
+	dnsSuccessful = generateNewCounter("dns_success")
+	dnsFailed = generateNewCounter("dns_failed")
+	curlProbeSuccess = generateNewCounter("curl_probe_success")
+	curlProbeFailed = generateNewCounter("curl_probe_failed")
 }
 
-func startPrometheusMetricsHandler() {
+func startPrometheusMetricsHandler(ctx context.Context) {
 	http.Handle("/metrics", promhttp.Handler())
+	go periodicMetricsPrinter(ctx)
 	http.ListenAndServe(":2112", nil)
+}
+
+// periodicMetricsPrinter dumps all prometheus metrics every N minutes
+func periodicMetricsPrinter(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute * 5)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			printMetrics()
+		}
+	}
+}
+
+// Copy of Gatherer.WriteTextToFile from prometheus - except we filter out and print only our metrics
+func printMetrics() error {
+	buf := &bytes.Buffer{}
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return err
+	}
+	for _, mf := range mfs {
+		if strings.HasSuffix(*mf.Name, "failed") || strings.HasSuffix(*mf.Name, "success") {
+			if _, err := expfmt.MetricFamilyToText(buf, mf); err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Println(buf.String())
+	return nil
 }
